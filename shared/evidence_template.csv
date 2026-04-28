@@ -1,0 +1,2 @@
+challenge,system,metric,threshold,observed,status,mitigation,notes,timestamp
+# example,GermanCredit-LogReg,Demographic parity difference,<= 0.10,0.187,fail,none,Modello favorisce gruppo A; gap oltre soglia regolatoria,2026-04-28T10:00:00Z
