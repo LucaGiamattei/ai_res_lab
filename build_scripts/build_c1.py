@@ -18,24 +18,19 @@ OUT_DIR = ROOT / "challenge_1_fairness"
 INTRO_MD = """\
 # Challenge 1 — Cerca il bias
 
-**Tema:** fairness audit di un classificatore di credit scoring sul dataset *Statlog (German Credit)*.
+**Cosa farete (~25 min, 5 step):**
 
-**Pertinenza normativa.** Il credit scoring rientra fra i sistemi ad alto rischio elencati nell'**Allegato III** del Regolamento (UE) 2024/1689 (AI Act), specificamente al punto 5(b): *"sistemi di IA destinati a essere utilizzati per valutare l'affidabilità creditizia delle persone fisiche o stabilirne il punteggio di credito"*. Per tali sistemi, gli articoli **9** (gestione del rischio), **10** (data governance), **13** (trasparenza) e **14** (sorveglianza umana) impongono — fra l'altro — l'esecuzione di valutazioni di fairness e la documentazione strutturata dei risultati.
+1. Caricate il dataset *Statlog (German Credit)* e identificate l'attributo protetto (`sex`, derivato da `personal_status`).
+2. Addestrate un classificatore baseline (`LogisticRegression`).
+3. Misurate **4 metriche di fairness** con `fairlearn.MetricFrame`.
+4. Applicate una mitigazione post-hoc (`ThresholdOptimizer`) e ri-misurate.
+5. Compilate **2 evidence row** (baseline + mitigato) in `shared/evidence_template.csv`.
 
-**Obiettivo del laboratorio.** In ~25 minuti:
+**Pertinenza normativa.** Il credit scoring è sistema ad alto rischio (AI Act, Allegato III §5b). Gli Artt. **9** (gestione del rischio), **10** (data governance), **13** (trasparenza), **14** (sorveglianza umana) impongono valutazioni di fairness documentate.
 
-1. Carichiamo il dataset e identifichiamo un attributo protetto (sesso) — già qui emerge una sciatteria reale: il dataset codifica sesso e stato civile **insieme**, costringendoci a una scelta di proxy.
-2. Addestriamo un classificatore baseline — la regressione logistica, non perché sia il modello migliore ma perché serve una baseline interpretabile per discutere fairness.
-3. Misuriamo **quattro** metriche di fairness diverse (e non equivalenti) tramite `fairlearn.MetricFrame`.
-4. Applichiamo una mitigazione post-hoc (`ThresholdOptimizer`) e misuriamo il tradeoff.
-5. Compiliamo due **evidence row** (vedi `docs/EVIDENCE_TEMPLATE.md`) che diventano gli artefatti dell'audit.
+**Tema chiave.** Esistono almeno **4 metriche di fairness non equivalenti**. Il *teorema di impossibilità* (Chouldechova 2017, Kleinberg et al. 2016) afferma che — se i base rate differiscono fra gruppi — *non* si possono soddisfare contemporaneamente *demographic parity*, *equal opportunity* e *predictive parity*. La scelta della metrica è una **scelta di policy**, non tecnica.
 
-**Riferimento normativo:** Regolamento (UE) 2024/1689, Allegato III §5(b); Artt. 9, 10, 13, 14.
-
-**Riferimenti tecnici:**
-- Hardt, Price, Srebro. *Equality of Opportunity in Supervised Learning.* NeurIPS 2016.
-- Chouldechova. *Fair prediction with disparate impact.* Big Data 2017. (Teorema di impossibilità)
-- Bird et al. *Fairlearn: A toolkit for assessing and improving fairness in AI.* 2020.
+> Riferimenti completi alla fine del notebook.
 """
 
 CELL_IMPORTS_INSTALL = """\
@@ -201,8 +196,14 @@ Subito dopo, cella di verifica: l'accuratezza deve essere > 0.7 (ragionevole per
 """
 
 TODO2_STARTER = """\
-# TODO 2: build a sklearn Pipeline(preprocessor, LogisticRegression) and fit it.
-# Then predict on the test set and report accuracy, precision, recall, F1.
+# TODO 2: costruite una Pipeline (preprocessor + LogisticRegression) e addestratela.
+# Schema (decommenta e completa):
+#
+# baseline_clf = Pipeline([
+#     ("pre", preprocessor),
+#     ("clf", LogisticRegression(max_iter=1000, random_state=SEED)),
+# ])
+# baseline_clf.fit(X_train, y_train)
 
 baseline_clf = None  # TODO
 
@@ -258,11 +259,25 @@ Costruite un `MetricFrame` con `selection_rate`, `true_positive_rate`, `false_po
 """
 
 TODO3_STARTER = """\
-# TODO 3: build a MetricFrame and compute the fairness metrics on the baseline predictions.
+# TODO 3: calcolate le metriche di fairness sulle predizioni del baseline.
+# Schema (decommenta e completa):
+#
+# metrics_baseline = MetricFrame(
+#     metrics={
+#         "selection_rate":      selection_rate,
+#         "true_positive_rate":  true_positive_rate,
+#         "false_positive_rate": false_positive_rate,
+#     },
+#     y_true=y_test,
+#     y_pred=y_pred_baseline,
+#     sensitive_features=sex_test,
+# )
+# dpd_baseline = demographic_parity_difference(y_test, y_pred_baseline, sensitive_features=sex_test)
+# eod_baseline = equalized_odds_difference(y_test, y_pred_baseline, sensitive_features=sex_test)
 
-metrics_baseline = None       # TODO: MetricFrame
-dpd_baseline = None           # TODO: demographic_parity_difference(...)
-eod_baseline = None           # TODO: equalized_odds_difference(...)
+metrics_baseline = None       # TODO
+dpd_baseline = None           # TODO
+eod_baseline = None           # TODO
 
 if metrics_baseline is None or dpd_baseline is None or eod_baseline is None:
     raise NotImplementedError("Compilare il calcolo delle metriche di fairness.")
@@ -332,10 +347,29 @@ TODO4_MD = """\
 """
 
 TODO4_STARTER = """\
-# TODO 4: fit a ThresholdOptimizer and re-compute the fairness metrics.
+# TODO 4: applicate ThresholdOptimizer e ri-calcolate le metriche.
+# Schema (decommenta e completa):
+#
+# mitigator = ThresholdOptimizer(
+#     estimator=baseline_clf,
+#     constraints="equalized_odds",
+#     objective="accuracy_score",
+#     prefit=True,
+# )
+# mitigator.fit(X_train, y_train, sensitive_features=sex_train)
+# y_pred_mitigated = mitigator.predict(X_test, sensitive_features=sex_test, random_state=SEED)
+#
+# metrics_mitigated = MetricFrame(
+#     metrics={"selection_rate": selection_rate,
+#              "true_positive_rate": true_positive_rate,
+#              "false_positive_rate": false_positive_rate},
+#     y_true=y_test, y_pred=y_pred_mitigated, sensitive_features=sex_test,
+# )
+# dpd_mitigated = demographic_parity_difference(y_test, y_pred_mitigated, sensitive_features=sex_test)
+# eod_mitigated = equalized_odds_difference(y_test, y_pred_mitigated, sensitive_features=sex_test)
 
-mitigator = None              # TODO: ThresholdOptimizer(...)
-y_pred_mitigated = None       # TODO: mitigator.predict(X_test, sensitive_features=sex_test)
+mitigator = None              # TODO
+y_pred_mitigated = None       # TODO
 
 metrics_mitigated = None      # TODO
 dpd_mitigated = None          # TODO
@@ -551,6 +585,14 @@ Quello che avete appena fatto produce evidenze direttamente ascrivibili a (vedi 
 - **Art. 14** (Sorveglianza umana) — la scelta della metrica e della soglia *non* va automatizzata: è una scelta di policy che richiede revisione umana.
 
 In un sistema reale, questo audit andrebbe ripetuto periodicamente (es. settimanalmente, su slice di traffico recenti) e i risultati archiviati in modo immutabile nel ledger di evidenze.
+
+## Riferimenti
+
+- Hardt, Price, Srebro. *Equality of Opportunity in Supervised Learning.* NeurIPS 2016.
+- Chouldechova. *Fair prediction with disparate impact.* Big Data 2017. (Teorema di impossibilità)
+- Kleinberg, Mullainathan, Raghavan. *Inherent Trade-Offs in the Fair Determination of Risk Scores.* ITCS 2017.
+- Bird et al. *Fairlearn: A toolkit for assessing and improving fairness in AI.* 2020.
+- Regolamento (UE) 2024/1689 (AI Act), Allegato III §5(b); Artt. 9, 10, 13, 14.
 """
 
 STRETCH_MD = """\

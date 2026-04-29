@@ -1,23 +1,30 @@
-# Challenge 4 — Difese LLM e Leaderboard
+# Challenge 4 — Difese LLM: misurare che funzionano
 
-**Tempo stimato:** 25 minuti.
-**Articoli AI Act:** Art. 9 (Risk management — *misure di mitigazione*), Art. 15 (Cibersicurezza). Allegato IV §2.g.
+**Tempo stimato:** 20–25 minuti.
+**Articoli AI Act:** Art. 9.2.d (misure di mitigazione), Art. 15 §3 (cibersicurezza misurabile). Allegato IV §2.g.
 
-**Prerequisito:** aver completato C3 (red-team baseline). C4 estende C3 con due esperimenti che spostano la discussione dall'*identificare* il rischio al *misurarne la mitigazione*.
+**Prerequisito:** C3 completato, chiave Groq disponibile.
 
 ## Obiettivo
 
-Trasformare i risultati di red-team di C3 (evidenze di vulnerabilità) in azioni concrete:
+In C3 avete dimostrato che il sistema è vulnerabile. Qui dimostrate che una mitigazione **funziona** — con numeri pre/post, non con asserzioni di principio.
 
-1. **Subtask D — Leaderboard di jailbreak con LLM-as-judge.** Un *secondo* LLM funge da giudice automatico: legge prompt + risposta e produce uno score [0–10] con motivazione, secondo una rubrica esplicita. Si fa una piccola gara fra team — chi ottiene il jailbreak con score più alto vince. Trasforma il red-team da attività narrativa a *misura ripetibile*.
-2. **Subtask E — Defense-design e re-test.** Gli studenti propongono un *system prompt indurito* (o un output filter) e ri-eseguono il proprio jailbreak migliore + le 2 email di prompt injection di C3. Misurano il **delta** di robustezza e producono due evidence row (pre-defense, post-defense) — l'analogo di C1 per la fairness, ma per la sicurezza LLM.
+Pipeline lineare, senza fronzoli:
+
+1. Caricate **5 attacchi pre-definiti** che bucano il system prompt baseline di C3.
+2. Eseguite gli attacchi → un **giudice LLM** (`llama-3.3-70b-versatile`) assegna a ciascuno uno score 0–10 secondo una rubrica strutturata.
+3. **TODO unico:** progettate il **vostro** system prompt indurito.
+4. Eseguite gli stessi 5 attacchi contro la vostra difesa → nuovi score.
+5. Confrontate. Lo *Δ score* (`mean_pre − mean_post`) è l'evidenza che la difesa riduce il rischio.
+
+In più, una cella opzionale finale confronta la vostra difesa con un prompt indurito di riferimento (`prompts/bank_assistant_hardened.txt`).
 
 ## Cosa imparate
 
-- Che la valutazione manuale del red-team **non scala**: serve un giudice automatico con rubrica esplicita perché il risultato sia auditabile (Art. 15 §3 — "*misure verificabili e proporzionate*").
-- Che un giudice LLM è **anche lui** vulnerabile: se l'attacker controlla parte dell'input del judge (es. la risposta dell'assistente vittima), può far inquinare il punteggio. Mitigazione: rubrica con campi strutturati e output JSON validato.
-- Che la mitigazione è efficace **solo se misurata**: una system prompt "più severa" potrebbe non funzionare. Il delta tra pre- e post-defense è l'evidenza.
-- Che in un fascicolo Annex IV una mitigazione non documentata da una metrica pre/post non vale.
+- Che le difese LLM **funzionano** se ben scritte — e che la prova è un numero, non un'opinione.
+- Che valutare a mano N attacchi non scala: serve un **giudice automatico** con rubrica esplicita per produrre un'evidenza ripetibile (Art. 15 §3).
+- Che un giudice LLM è **anche lui** vulnerabile: rubrica strutturata + output JSON + temperature 0 sono mitigazioni parziali, non eliminano il problema.
+- Che in un fascicolo Annex IV una mitigazione non documentata da metriche pre/post non vale come evidenza.
 
 ## File
 
@@ -29,30 +36,22 @@ challenge_4_llm_defense/
 └── prompts/
     ├── judge_system.txt              <- rubrica per LLM-as-judge
     ├── bank_assistant_hardened.txt   <- system prompt indurito di riferimento
-    └── jailbreak_seed_prompts.txt    <- 5 jailbreak iniziali per popolare la leaderboard
+    └── jailbreak_seed_prompts.txt    <- 5 jailbreak pre-definiti
 ```
-
-## Sottosfide
-
-| Subtask | Attività | Tempo |
-|---------|----------|-------|
-| D       | Leaderboard di jailbreak (LLM-as-judge) | 12 min |
-| E       | Defense-design + re-test (delta evidence row) | 13 min |
 
 ## Output attesi
 
-1. `starter.ipynb` con tutti i TODO compilati.
-2. Una tabella *leaderboard* con N tentativi, score giudice, motivazione.
-3. Due evidence row aggiuntive in `shared/evidence_template.csv`:
-   - `C4 / BankAssistant-Llama3.1-8B / Jailbreak resilience (judge score) / pre-defense / ...`
-   - `C4 / BankAssistant-Llama3.1-8B-hardened / Jailbreak resilience (judge score) / post-defense / ... / mitigation = "Hardened system prompt"`
+1. `starter.ipynb` con il TODO compilato (`MY_HARDENED_SYSTEM` riempito).
+2. Due evidence row aggiuntive in `shared/evidence_template.csv`:
+   - `C4 / BankAssistant-Llama3.1-8B / mean judge score / pre-defense / ...`
+   - `C4 / BankAssistant-Llama3.1-8B-hardened / mean judge score / post-defense / ... / mitigation = "Hardened system prompt (designed by student)"`
 
 ## ⚠️ Etica e LLM-as-judge
 
-Un LLM giudice **non è un giudice neutrale**. È a sua volta soggetto a:
+Un LLM giudice **non è un giudice neutrale**. È soggetto a:
 
 - **Bias di lunghezza** — risposte più lunghe ottengono più spesso punteggi alti.
 - **Bias di stile** — risposte assertive vengono ritenute più affidabili anche se sbagliate.
 - **Self-consistency** — chiedere lo stesso giudizio 5 volte può dare 3 esiti diversi a temperature > 0.
 
-Per questo nella nostra rubrica forziamo: (a) `temperature=0`, (b) output JSON con campi puntuali, (c) la motivazione *prima* del punteggio (per ridurre il bias di ancoraggio sul numero finale). Sono mitigazioni parziali. In un audit reale si userebbero ensemble di giudici diversi e/o validazione umana su un sample.
+Per questo la rubrica forza: (a) `temperature=0`, (b) output JSON con campi puntuali, (c) la motivazione *prima* del punteggio (per ridurre l'ancoraggio sul numero finale). Sono mitigazioni parziali. In un audit reale si usano ensemble di giudici diversi + validazione umana su un sample.

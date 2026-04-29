@@ -1,4 +1,13 @@
-"""Build challenge_2_adversarial/{starter,solution}.ipynb."""
+"""Build challenge_2_adversarial/{starter,solution}.ipynb.
+
+Streamlined design (post-feedback):
+  - Lead with the WORKING attack (BIM) — students see success immediately.
+  - Single TODO: implement bim_attack. One TODO for the evidence row.
+  - The demo cell shows panda original | perturbation x50 | adversarial,
+    with predictions stamped on each panel (the "AHA moment").
+  - Systematic sweep on BIM only (clear monotone curve, drops to 0 at eps>=0.005).
+  - FGSM is shown briefly at the end as historical/weaker baseline (no TODO).
+"""
 from __future__ import annotations
 import sys
 from pathlib import Path
@@ -10,30 +19,30 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT_DIR = ROOT / "challenge_2_adversarial"
 
 
-# ---------- Cells -----------------------------------------------------------------------------------
+# ---------- Cells ---------------------------------------------------------------------------------
 
 INTRO_MD = r"""
 # Challenge 2 — Rompi il modello
 
-**Tema:** generare *esempi avversariali* (FGSM, Goodfellow et al. 2015) contro un classificatore ImageNet pre-addestrato (`MobileNetV2`) e operazionalizzare la nozione di "robustezza" tramite un budget di perturbazione esplicito.
+**Tema.** Esempi avversariali: piccole perturbazioni dei pixel — **impercettibili all'occhio umano** — che portano un classificatore ImageNet pre-addestrato (`MobileNetV2`) a sbagliare con confidenza alta.
 
-**Pertinenza normativa.** L'**Art. 15** del Regolamento (UE) 2024/1689 impone, per i sistemi ad alto rischio, un livello "appropriato" di **accuratezza, robustezza e cibersicurezza**. In particolare il §5 specifica che i sistemi devono essere "*resilienti rispetto a tentativi di terzi non autorizzati di alterarne l'uso, gli output o le prestazioni sfruttando vulnerabilità del sistema*". Le perturbazioni avversariali sono il caso paradigmatico di questa minaccia.
+**Pertinenza normativa.** L'**Art. 15** del Regolamento (UE) 2024/1689 impone, per i sistemi ad alto rischio, *"un livello appropriato di accuratezza, robustezza e cibersicurezza"*. Il §5 specifica che i sistemi devono essere "*resilienti rispetto a tentativi di terzi non autorizzati di alterarne l'uso, gli output o le prestazioni sfruttando vulnerabilità del sistema*". Le perturbazioni avversariali sono il caso paradigmatico.
 
-**Obiettivo.** In ~30 minuti:
+**Pipeline (lineare):**
 
-1. Carichiamo MobileNetV2 e verifichiamo predizioni baseline su 5 immagini ImageNet.
-2. Implementiamo FGSM nella sua forma canonica:
-   $$\hat{x}_{\mathrm{adv}} = \mathrm{clip}\bigl(x + \varepsilon \cdot \mathrm{sign}\bigl(\nabla_x \mathcal{L}(\theta, x, y)\bigr), 0, 1\bigr)$$
-   dove $\mathcal{L}$ è la cross-entropy e $\varepsilon$ il *budget* di perturbazione $L_\infty$.
-3. Eseguiamo uno sweep su $\varepsilon \in \{0.001, 0.005, 0.01, 0.02, 0.05, 0.1\}$.
-4. Definiamo la *robustezza* come $\varepsilon_{\max}$ per cui l'accuratezza resta $\geq 0.80$, e compiliamo l'evidence row.
+1. Carichiamo MobileNetV2 e verifichiamo che predice correttamente le 5 immagini campione.
+2. Implementiamo **BIM** (*Basic Iterative Method*, Kurakin et al. 2017): FGSM iterato con proiezione sulla L-inf ball.
+3. **Demo**: applichiamo BIM al panda con ε=0.01 → vediamo l'immagine *visivamente identica* essere classificata come qualcos'altro.
+4. **Sweep**: misuriamo l'accuratezza in funzione di ε.
+5. Compiliamo l'evidence row: la robustezza è operazionalizzata come *"il più grande ε per cui l'accuratezza resta ≥ 80%"*.
 
-**FGSM è l'attacco più *debole* della letteratura.** Una valutazione di robustezza rigorosa richiederebbe PGD (Madry et al. 2018) e AutoAttack (Croce & Hein 2020). Qui FGSM serve da *baseline pedagogico*: se il modello cade contro FGSM, cade a fortiori contro attacchi più sofisticati.
+> Perché BIM e non FGSM (Goodfellow 2015)? FGSM è l'attacco *single-step* originale; sui modelli moderni risulta troppo debole per produrre un fallimento netto a piccoli ε. BIM è iterativo, e a ε=0.005 manda già MobileNetV2 a 0% di accuratezza — il regime "non robusto" è inequivoco. Una cella finale facoltativa mostra il confronto.
 
 **Riferimenti:**
-- Goodfellow, Shlens, Szegedy. *Explaining and Harnessing Adversarial Examples.* ICLR 2015.
-- Madry et al. *Towards Deep Learning Models Resistant to Adversarial Attacks.* ICLR 2018.
-- Croce, Hein. *Reliable evaluation of adversarial robustness with an ensemble of diverse parameter-free attacks.* ICML 2020.
+- Goodfellow, Shlens, Szegedy. *Explaining and Harnessing Adversarial Examples.* ICLR 2015. (FGSM)
+- Kurakin, Goodfellow, Bengio. *Adversarial Examples in the Physical World.* ICLR Workshop 2017. (BIM)
+- Madry et al. *Towards Deep Learning Models Resistant to Adversarial Attacks.* ICLR 2018. (PGD = BIM + random init)
+- Croce, Hein. *Reliable evaluation of adversarial robustness with an ensemble of diverse parameter-free attacks.* ICML 2020. (AutoAttack)
 """
 
 CELL_INSTALL = """\
@@ -77,11 +86,10 @@ CELL_LOAD_MODEL = """\
 weights = MobileNet_V2_Weights.IMAGENET1K_V2
 base_model = mobilenet_v2(weights=weights).to(DEVICE).eval()
 
-# Load the class labels.
+# ImageNet class labels.
 classes = [l.strip() for l in CLASSES_FILE.read_text().splitlines() if l.strip()]
 assert len(classes) == 1000, f"Expected 1000 classes, got {len(classes)}"
 print(f"Loaded MobileNetV2 ({sum(p.numel() for p in base_model.parameters())/1e6:.2f} M params)")
-print(f"Classes loaded: {len(classes)}")
 """
 
 CELL_NORMALIZED_MODEL = """\
@@ -125,7 +133,6 @@ def predict(x: torch.Tensor, k: int = 5):
     top = torch.topk(probs, k)
     return [(int(i), classes[int(i)], float(p)) for i, p in zip(top.indices, top.values)]
 
-# Tensor representation utilities for matplotlib display.
 def to_displayable(x: torch.Tensor) -> np.ndarray:
     return x.detach().clamp(0, 1).cpu().squeeze(0).permute(1, 2, 0).numpy()
 """
@@ -150,371 +157,32 @@ for ax, (fname, expected_id, expected_name) in zip(axes, SAMPLES):
     ax.set_title(f"{fname}\\n{top1[1]}\\np={top1[2]:.2f} [{ok}]", fontsize=8)
 plt.tight_layout()
 plt.show()
+print("Tutte e 5 le immagini sono classificate correttamente — punto di partenza.")
 """
 
-# TODO 1 — fgsm_attack
-TODO1_MD = r"""
-## TODO 1 — Implementate `fgsm_attack`
+# ----- Single TODO: implement BIM -----------------------------------------------------------------
 
-Date un'immagine $x \in [0,1]^{1 \times 3 \times H \times W}$ e la sua label vera $y$, FGSM produce:
+TODO_BIM_MD = r"""
+## TODO — Implementate `bim_attack`
 
-$$\hat{x}_{\mathrm{adv}} = \mathrm{clip}\bigl(x + \varepsilon \cdot \mathrm{sign}\bigl(\nabla_x \mathcal{L}(\theta, x, y)\bigr), 0, 1\bigr)$$
-
-Hint operativi (in commento qui sotto):
-- `image.requires_grad_(True)` per registrare il gradiente
-- `loss = F.cross_entropy(logits, label)`
-- `loss.backward()` calcola il gradiente
-- il gradiente è in `image.grad`
-- usare `.sign()` per ottenere il sign-tensor
-
-Restituire un tensore della stessa forma e dtype dell'input, **scollegato** dal grafo computazionale (`detach()`).
-
-Vincolo importante: applicare `clamp(0, 1)` per restare in pixel-space valido. Senza clamp, eps grandi producono pixel out-of-range che non sono immagini reali.
-"""
-
-TODO1_STARTER = """\
-def fgsm_attack(model: nn.Module, image: torch.Tensor, label: torch.Tensor, epsilon: float) -> torch.Tensor:
-    \"\"\"FGSM attack in [0, 1] pixel space.
-
-    Args:
-        model: differentiable classifier; expects input shape (B, 3, H, W) in [0, 1].
-        image: input tensor (1, 3, H, W) in [0, 1].
-        label: ground-truth class id, shape (1,).
-        epsilon: L-infinity perturbation budget.
-
-    Returns:
-        adv: adversarial image, same shape and dtype as `image`, in [0, 1].
-    \"\"\"
-    # TODO: implement FGSM. Hints:
-    # 1. image = image.clone().detach().requires_grad_(True)
-    # 2. logits = model(image); loss = F.cross_entropy(logits, label)
-    # 3. model.zero_grad(); loss.backward()
-    # 4. perturb = epsilon * image.grad.sign()
-    # 5. adv = (image + perturb).clamp(0, 1).detach()
-    raise NotImplementedError("Implementare fgsm_attack")
-"""
-
-TODO1_SOLUTION = """\
-def fgsm_attack(model: nn.Module, image: torch.Tensor, label: torch.Tensor, epsilon: float) -> torch.Tensor:
-    \"\"\"FGSM attack in [0, 1] pixel space.\"\"\"
-    image = image.clone().detach().requires_grad_(True)
-    logits = model(image)
-    loss = F.cross_entropy(logits, label)
-    model.zero_grad()
-    loss.backward()
-    perturb = epsilon * image.grad.sign()
-    adv = (image + perturb).clamp(0.0, 1.0).detach()
-    return adv
-"""
-
-CELL_VERIFY_TODO1 = """\
-# Verify: shape, dtype, range.
-x = load_image("panda.jpg")
-y = torch.tensor([388], device=DEVICE)  # giant panda
-
-x_adv = fgsm_attack(model, x, y, epsilon=0.01)
-assert x_adv.shape == x.shape,           f"Shape mismatch: {x_adv.shape} vs {x.shape}"
-assert x_adv.dtype == x.dtype,           f"Dtype mismatch: {x_adv.dtype} vs {x.dtype}"
-assert x_adv.min() >= 0 - 1e-6,          f"Pixel < 0: {x_adv.min()}"
-assert x_adv.max() <= 1 + 1e-6,          f"Pixel > 1: {x_adv.max()}"
-linf = (x_adv - x).abs().max().item()
-assert linf <= 0.01 + 1e-6,              f"L-inf budget violato: {linf}"
-print(f"OK: shape={tuple(x_adv.shape)}, L-inf perturbation = {linf:.6f}")
-"""
-
-# TODO 2 — single attack
-TODO2_MD = """\
-## TODO 2 — Attacco singolo sul panda con `epsilon=0.01`
-
-1. Caricate `panda.jpg`.
-2. Eseguite `fgsm_attack` con `epsilon=0.01`.
-3. Visualizzate (asse 1×3): originale | perturbazione amplificata 50× | adversarial.
-4. Stampate la top-1 prediction su entrambi (originale e adversarial).
-"""
-
-TODO2_STARTER = """\
-# TODO 2: single FGSM attack on panda.jpg with epsilon=0.01.
-
-EPSILON = 0.01
-x        = load_image("panda.jpg")
-y        = torch.tensor([388], device=DEVICE)
-
-x_adv    = None  # TODO: chiamare fgsm_attack(model, x, y, EPSILON)
-
-if x_adv is None:
-    raise NotImplementedError("Eseguire l'attacco e salvare il risultato in x_adv.")
-
-perturb_amplified = (x_adv - x) * 50.0 + 0.5  # for visualization
-
-fig, axes = plt.subplots(1, 3, figsize=(10, 4))
-axes[0].imshow(to_displayable(x));                axes[0].set_title("Originale")
-axes[1].imshow(to_displayable(perturb_amplified)); axes[1].set_title("Perturbazione (×50, +0.5)")
-axes[2].imshow(to_displayable(x_adv));            axes[2].set_title(f"Adversarial (eps={EPSILON})")
-for ax in axes: ax.axis("off")
-plt.tight_layout(); plt.show()
-
-p_orig = predict(x, k=1)[0]
-p_adv  = predict(x_adv, k=1)[0]
-print(f"Originale: id={p_orig[0]:>4d} '{p_orig[1]}' p={p_orig[2]:.3f}")
-print(f"Adversarial: id={p_adv[0]:>4d} '{p_adv[1]}' p={p_adv[2]:.3f}")
-print(f"Predizione cambiata: {p_orig[0] != p_adv[0]}")
-"""
-
-TODO2_SOLUTION = """\
-EPSILON = 0.01
-x        = load_image("panda.jpg")
-y        = torch.tensor([388], device=DEVICE)
-
-x_adv    = fgsm_attack(model, x, y, EPSILON)
-
-perturb_amplified = (x_adv - x) * 50.0 + 0.5
-
-fig, axes = plt.subplots(1, 3, figsize=(10, 4))
-axes[0].imshow(to_displayable(x));                axes[0].set_title("Originale")
-axes[1].imshow(to_displayable(perturb_amplified)); axes[1].set_title("Perturbazione (\\u00d750, +0.5)")
-axes[2].imshow(to_displayable(x_adv));            axes[2].set_title(f"Adversarial (eps={EPSILON})")
-for ax in axes: ax.axis("off")
-plt.tight_layout(); plt.show()
-
-p_orig = predict(x, k=1)[0]
-p_adv  = predict(x_adv, k=1)[0]
-print(f"Originale: id={p_orig[0]:>4d} '{p_orig[1]}' p={p_orig[2]:.3f}")
-print(f"Adversarial: id={p_adv[0]:>4d} '{p_adv[1]}' p={p_adv[2]:.3f}")
-print(f"Predizione cambiata: {p_orig[0] != p_adv[0]}")
-"""
-
-# TODO 3 — sweep
-TODO3_MD = """\
-## TODO 3 — Sweep su $\\varepsilon$
-
-Per ciascun valore di $\\varepsilon \\in \\{0.001, 0.005, 0.01, 0.02, 0.05, 0.1\\}$ e per ciascuna delle 5 immagini:
-
-1. Generate l'esempio avversariale con `fgsm_attack`.
-2. Verificate se la top-1 prediction è cambiata rispetto alla label vera.
-3. Misurate la perturbazione $L_\\infty$ effettiva.
-
-Tabulate i risultati in un dizionario `results[eps] = {"acc": ..., "linf": ...}` dove `acc` è la frazione di immagini ancora correttamente classificate e `linf` è la media delle perturbazioni.
-
-Suggerimento: usate `EPSILONS = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1]` e iterate.
-"""
-
-TODO3_STARTER = """\
-# TODO 3: epsilon sweep over the 5 sample images.
-
-EPSILONS = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1]
-results = {}  # eps -> {"acc": float, "linf": float, "flips": list[bool]}
-
-# TODO: loop over EPSILONS and SAMPLES; for each combo, run FGSM, check correctness, record metrics.
-
-if not results:
-    raise NotImplementedError("Compilare il dizionario results.")
-
-print(f"{'eps':<10}{'acc':<10}{'mean L-inf':<15}")
-for eps in EPSILONS:
-    print(f"{eps:<10}{results[eps]['acc']:<10.3f}{results[eps]['linf']:<15.5f}")
-"""
-
-TODO3_SOLUTION = """\
-EPSILONS = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1]
-results = {}
-
-for eps in EPSILONS:
-    flips = []
-    linfs = []
-    for fname, expected_id, _ in SAMPLES:
-        x = load_image(fname)
-        y = torch.tensor([expected_id], device=DEVICE)
-        x_adv = fgsm_attack(model, x, y, eps)
-        adv_pred_id = predict(x_adv, k=1)[0][0]
-        flipped = adv_pred_id != expected_id
-        flips.append(flipped)
-        linfs.append((x_adv - x).abs().max().item())
-    results[eps] = {
-        "acc": 1.0 - sum(flips) / len(flips),
-        "linf": float(np.mean(linfs)),
-        "flips": flips,
-    }
-
-print(f"{'eps':<10}{'acc':<10}{'mean L-inf':<15}")
-for eps in EPSILONS:
-    print(f"{eps:<10}{results[eps]['acc']:<10.3f}{results[eps]['linf']:<15.5f}")
-"""
-
-CELL_VIZ_GRID = """\
-# Visualization scaffold: 6x3 grid of (original / perturbation / adversarial) on the panda
-# at each epsilon, plus an accuracy-vs-epsilon line chart.
-
-panda_x = load_image("panda.jpg")
-panda_y = torch.tensor([388], device=DEVICE)
-
-fig, axes = plt.subplots(len(EPSILONS), 3, figsize=(9, 2.6 * len(EPSILONS)))
-for row, eps in enumerate(EPSILONS):
-    x_adv = fgsm_attack(model, panda_x, panda_y, eps)
-    perturb_amp = (x_adv - panda_x) * 50.0 + 0.5
-    p_adv = predict(x_adv, k=1)[0]
-    axes[row, 0].imshow(to_displayable(panda_x));   axes[row, 0].set_title(f"eps={eps}\\nOriginale", fontsize=9)
-    axes[row, 1].imshow(to_displayable(perturb_amp));axes[row, 1].set_title("Perturbazione (\\u00d750)", fontsize=9)
-    axes[row, 2].imshow(to_displayable(x_adv));      axes[row, 2].set_title(f"Adv -> {p_adv[1]} ({p_adv[2]:.2f})", fontsize=9)
-    for c in range(3):
-        axes[row, c].axis("off")
-plt.tight_layout()
-plt.savefig(PACKAGE_ROOT / "challenge_2_adversarial" / "img" / "panda_eps_sweep.png", dpi=110, bbox_inches="tight")
-plt.show()
-
-# Line chart: accuracy vs epsilon.
-fig, ax = plt.subplots(figsize=(7, 4))
-xs = list(results.keys())
-ys = [results[e]["acc"] for e in xs]
-ax.plot(xs, ys, marker="o", color="#CC3311")
-ax.set_xscale("log")
-ax.set_xlabel("epsilon (L-inf budget)")
-ax.set_ylabel("accuracy on 5 samples")
-ax.set_ylim(-0.05, 1.05)
-ax.axhline(0.8, ls="--", color="grey", label="target 80%")
-ax.set_title("MobileNetV2 — FGSM accuracy vs perturbation budget")
-ax.legend()
-plt.tight_layout()
-plt.savefig(PACKAGE_ROOT / "challenge_2_adversarial" / "img" / "eps_sweep.png", dpi=110, bbox_inches="tight")
-plt.show()
-"""
-
-# TODO 4 — evidence row
-TODO4_MD = """\
-## TODO 4 — Definite la *robustezza operativa* e compilate l'evidence row
-
-Date i vostri `results`, definite la *robustezza operativa* come:
-
-$$\\varepsilon_{\\max}^{(80\\%)} = \\max\\Bigl\\{\\varepsilon : \\mathrm{acc}(\\varepsilon') \\geq 0.80 \\,\\,\\forall\\, \\varepsilon' \\leq \\varepsilon\\Bigr\\}$$
-
-cioè il più grande budget di perturbazione per cui l'accuratezza resta $\\geq 0.80$ **in maniera monotona** (dal valore più piccolo testato fino a $\\varepsilon$ incluso). Se l'accuratezza scende sotto $0.80$ già al primo $\\varepsilon$ testato, $\\varepsilon_{\\max} = 0$ — il modello non è robusto al budget testato più piccolo.
-
-> Perché la versione monotona? FGSM è un attacco *single-step*: piccoli eps e grandi eps possono incidentalmente non flippare gli stessi sample (effetto noto di non-monotonia di FGSM, vedi Madry et al. 2018). Il valore *monotonia-corretto* è una stima conservativa della robustezza ed è l'unica interpretazione coerente con la pretesa "il modello resiste fino a $\\varepsilon$".
-
-Compilate l'evidence row qui sotto. La soglia operativa che proponiamo è $\\varepsilon_{\\max} \\geq 0.05$: se non la raggiunge, `status=fail`.
-
-> 0.05 è una soglia *arbitraria scelta a fini didattici*. In un audit reale la soglia va scelta per criterio operativo (es. budget di perturbazione che un attaccante può realisticamente iniettare via JPEG compression, o tramite stickers fisici). Non esistono soglie regolatorie consolidate per FGSM in ImageNet — è materia di ricerca attiva.
-"""
-
-TODO4_STARTER = """\
-# TODO 4: compute eps_max @ 80% accuracy and write the evidence row.
-
-THRESHOLD_ACC = 0.80
-THRESHOLD_EPS = 0.05  # operational threshold (educational choice)
-
-eps_max = None  # TODO: monotone eps_max — the largest eps such that for ALL e <= eps,
-                #       results[e]["acc"] >= THRESHOLD_ACC.
-                #       Iterate sorted(EPSILONS) and break as soon as one fails.
-                #       If even the smallest eps fails, set eps_max = 0.0.
-
-if eps_max is None:
-    raise NotImplementedError("Calcolare eps_max")
-
-status = "pass" if eps_max >= THRESHOLD_EPS else "fail"
-NOTES = ""  # TODO: una frase, specifica.
-
-if not NOTES:
-    raise NotImplementedError("Compilare NOTES con un'osservazione specifica (1 frase).")
-
-ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-import csv
-row = dict(
-    challenge="C2",
-    system="ImageNet-MobileNetV2",
-    metric="Adversarial robustness (FGSM, L-inf, eps_max @ 80% acc)",
-    threshold=f">= {THRESHOLD_EPS}",
-    observed=f"{eps_max:.4f}",
-    status=status,
-    mitigation="none",
-    notes=NOTES,
-    timestamp=ts,
-)
-EVIDENCE_CSV.parent.mkdir(parents=True, exist_ok=True)
-write_header = not EVIDENCE_CSV.exists() or EVIDENCE_CSV.stat().st_size == 0
-with EVIDENCE_CSV.open("a", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=list(row.keys()))
-    if write_header:
-        w.writeheader()
-    w.writerow(row)
-print(f"eps_max @ 80% acc = {eps_max:.4f}  ->  status={status}")
-print(f"Wrote evidence row to {EVIDENCE_CSV}")
-"""
-
-TODO4_SOLUTION = """\
-THRESHOLD_ACC = 0.80
-THRESHOLD_EPS = 0.05
-
-# Compute eps_max with the monotone interpretation.
-eps_max = 0.0
-for eps in sorted(EPSILONS):
-    if results[eps]["acc"] >= THRESHOLD_ACC:
-        eps_max = eps
-    else:
-        break
-
-status = "pass" if eps_max >= THRESHOLD_EPS else "fail"
-flipped_classes = []
-for eps in sorted(results, reverse=True):
-    if results[eps]["acc"] < 1.0:
-        flipped = [SAMPLES[i][2] for i, f in enumerate(results[eps]["flips"]) if f]
-        flipped_classes = flipped
-        break
-NOTES = (
-    f"Robustezza FGSM bassa: gia' a eps={min(EPSILONS):.3f} l'accuratezza scende a {results[min(EPSILONS)]['acc']:.2f}. "
-    f"Classi flipped per prime: {', '.join(flipped_classes[:3]) if flipped_classes else 'nessuna'}. "
-    f"FGSM e' attacco debole; PGD/AutoAttack peggiorerebbero ulteriormente."
-)
-
-ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-import csv
-row = dict(
-    challenge="C2",
-    system="ImageNet-MobileNetV2",
-    metric="Adversarial robustness (FGSM, L-inf, eps_max @ 80% acc)",
-    threshold=f">= {THRESHOLD_EPS}",
-    observed=f"{eps_max:.4f}",
-    status=status,
-    mitigation="none",
-    notes=NOTES,
-    timestamp=ts,
-)
-EVIDENCE_CSV.parent.mkdir(parents=True, exist_ok=True)
-write_header = not EVIDENCE_CSV.exists() or EVIDENCE_CSV.stat().st_size == 0
-with EVIDENCE_CSV.open("a", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=list(row.keys()))
-    if write_header:
-        w.writeheader()
-    w.writerow(row)
-print(f"eps_max @ 80% acc = {eps_max:.4f}  ->  status={status}")
-print(f"Wrote evidence row to {EVIDENCE_CSV}")
-"""
-
-## ---- Subtask 5 — Attacchi iterativi (BIM): perché FGSM non basta ----
-
-BIM_INTRO_MD = r"""
-## TODO 5 — BIM (Basic Iterative Method): un attacco che *garantisce* il fallimento
-
-I risultati di TODO 3 hanno una stranezza: l'accuratezza non è monotona in $\varepsilon$. È un artefatto noto di FGSM (single-step): il segno del gradiente in $x$ è una direzione *grezza* che, scalata per $\varepsilon$, può attraversare e ri-attraversare frontiere di decisione in modo erratico.
-
-**BIM (Kurakin, Goodfellow, Bengio 2017)** — anche detto **I-FGSM** — risolve il problema applicando FGSM in $K$ piccoli passi:
+**BIM** (Basic Iterative Method, Kurakin–Goodfellow–Bengio 2017) è FGSM applicato $K$ volte con piccoli step:
 
 $$x^{(k+1)} = \mathrm{clip}_{[0,1]}\Bigl(\Pi_{B_\infty(x, \varepsilon)}\bigl(x^{(k)} + \alpha \cdot \mathrm{sign}(\nabla_x \mathcal{L}(\theta, x^{(k)}, y))\bigr)\Bigr)$$
 
 dove:
 - $\alpha < \varepsilon$ è lo step size (tipico $\alpha = \varepsilon/4$),
-- $\Pi_{B_\infty(x, \varepsilon)}$ è la **proiezione** sulla L-inf ball di raggio $\varepsilon$ centrata in $x$,
-- $K$ è il numero di iterazioni (tipico 10–20).
+- $\Pi_{B_\infty(x, \varepsilon)}$ è la **proiezione** sulla L-inf ball di raggio $\varepsilon$ centrata nell'immagine originale $x$,
+- $K$ è il numero di iterazioni (tipico 10).
 
-Senza la proiezione, BIM uscirebbe dalla ball ammessa. Con la proiezione, BIM è esattamente **PGD senza random init** (Madry et al. 2018) — è la base di tutta la moderna robustness evaluation.
+Senza la proiezione, BIM uscirebbe dal budget ammesso. Con la proiezione, BIM è esattamente **PGD senza random init** (Madry et al. 2018) — la base di tutta la moderna robustness evaluation.
 
-**Cosa aspettarsi.** Allo stesso $\varepsilon$ di FGSM, BIM-10 fa scendere l'accuratezza a **0/5** già a $\varepsilon = 0.005$. È il regime "il modello è certificatamente non robusto a questa scala di perturbazione".
-
-> Il costo di BIM è $K\times$ il costo di FGSM. Su CPU MobileNetV2: ~50 ms × 10 = ~500 ms per immagine — ancora trascurabile.
+> Costo: $K \times$ il costo di FGSM. Su CPU MobileNetV2: ~50 ms × 10 = ~500 ms per immagine. Trascurabile.
 """
 
-TODO5_STARTER = """\
+TODO_BIM_STARTER = """\
 def bim_attack(model: nn.Module, image: torch.Tensor, label: torch.Tensor,
                epsilon: float, alpha: float | None = None, steps: int = 10) -> torch.Tensor:
-    \"\"\"BIM / I-FGSM: iterated FGSM with projection on the L-inf ball.
+    \"\"\"BIM / I-FGSM in [0, 1] pixel space, with L-inf projection.
 
     Args:
         model: differentiable classifier; expects input shape (B, 3, H, W) in [0, 1].
@@ -527,25 +195,26 @@ def bim_attack(model: nn.Module, image: torch.Tensor, label: torch.Tensor,
     Returns:
         adv: adversarial image, same shape and dtype as `image`, in [0, 1].
     \"\"\"
-    # TODO: implement BIM. Hints:
-    # 1. if alpha is None: alpha = epsilon / 4
-    # 2. x_adv = image.clone().detach()
-    # 3. for _ in range(steps):
-    #       x_adv = x_adv.detach().requires_grad_(True)
-    #       logits = model(x_adv)
-    #       loss = F.cross_entropy(logits, label)
-    #       model.zero_grad(); loss.backward()
-    #       x_adv = x_adv + alpha * x_adv.grad.sign()
-    # 4. project back onto the L-inf ball around `image`:
-    #       x_adv = torch.max(torch.min(x_adv, image + epsilon), image - epsilon)
-    # 5. clamp into [0, 1].
+    # TODO: implement BIM. Hints (uncomment as you go):
+    # if alpha is None: alpha = epsilon / 4
+    # x_adv = image.clone().detach()
+    # for _ in range(steps):
+    #     x_adv = x_adv.detach().requires_grad_(True)
+    #     logits = model(x_adv)
+    #     loss = F.cross_entropy(logits, label)
+    #     model.zero_grad(); loss.backward()
+    #     x_adv = x_adv + alpha * x_adv.grad.sign()
+    #     # project back to L-inf ball:
+    #     x_adv = torch.max(torch.min(x_adv, image + epsilon), image - epsilon)
+    #     x_adv = x_adv.clamp(0.0, 1.0)
+    # return x_adv.detach()
     raise NotImplementedError("Implementare bim_attack")
 """
 
-TODO5_SOLUTION = """\
+TODO_BIM_SOLUTION = """\
 def bim_attack(model: nn.Module, image: torch.Tensor, label: torch.Tensor,
                epsilon: float, alpha: float | None = None, steps: int = 10) -> torch.Tensor:
-    \"\"\"BIM / I-FGSM with L-inf projection.\"\"\"
+    \"\"\"BIM / I-FGSM in [0, 1] pixel space, with L-inf projection.\"\"\"
     if alpha is None:
         alpha = epsilon / 4
     x_adv = image.clone().detach()
@@ -562,91 +231,195 @@ def bim_attack(model: nn.Module, image: torch.Tensor, label: torch.Tensor,
     return x_adv.detach()
 """
 
-CELL_VERIFY_TODO5 = """\
-# Verify: shape, dtype, range, AND that BIM strictly dominates FGSM at eps=0.01 on the panda.
+CELL_VERIFY_BIM = """\
+# Quick sanity check: shape, range, and that BIM at eps=0.01 actually flips the panda.
 x = load_image("panda.jpg")
-y = torch.tensor([388], device=DEVICE)
+y = torch.tensor([388], device=DEVICE)  # giant panda
+x_adv = bim_attack(model, x, y, epsilon=0.01, steps=10)
 
-x_adv_bim  = bim_attack(model, x, y, epsilon=0.01, steps=10)
-x_adv_fgsm = fgsm_attack(model, x, y, epsilon=0.01)
+assert x_adv.shape == x.shape
+assert x_adv.min() >= 0 - 1e-6 and x_adv.max() <= 1 + 1e-6
+linf = (x_adv - x).abs().max().item()
+assert linf <= 0.01 + 1e-6, f"L-inf budget violato: {linf}"
 
-assert x_adv_bim.shape == x.shape
-assert x_adv_bim.min() >= 0 - 1e-6 and x_adv_bim.max() <= 1 + 1e-6
-linf = (x_adv_bim - x).abs().max().item()
-assert linf <= 0.01 + 1e-6, f"BIM L-inf budget violato: {linf}"
-
-p_orig = predict(x,          k=1)[0]
-p_fgsm = predict(x_adv_fgsm, k=1)[0]
-p_bim  = predict(x_adv_bim,  k=1)[0]
-print(f"Originale       : {p_orig[1]:30s} p={p_orig[2]:.3f}")
-print(f"FGSM (eps=0.01) : {p_fgsm[1]:30s} p={p_fgsm[2]:.3f}  flipped={p_fgsm[0]!=388}")
-print(f"BIM-10 (eps=0.01): {p_bim[1]:30s} p={p_bim[2]:.3f}  flipped={p_bim[0]!=388}")
-print(f"OK: BIM L-inf perturbation = {linf:.6f}")
+p_orig = predict(x,     k=1)[0]
+p_adv  = predict(x_adv, k=1)[0]
+assert p_adv[0] != 388, "BIM non e' riuscito a flippare il panda — controllate l'implementazione."
+print(f"OK: BIM ha flippato il panda da '{p_orig[1]}' (p={p_orig[2]:.3f}) "
+      f"a '{p_adv[1]}' (p={p_adv[2]:.3f}) con perturbazione L-inf={linf:.6f}.")
 """
 
-BIM_SWEEP_MD = """\
-### Sweep BIM-10 sui 5 sample e plot comparativo FGSM vs BIM
+# ----- Demo: side-by-side panda viz with stamped predictions ---------------------------------------
+
+DEMO_MD = """\
+## Demo — il panda *visivamente identico* viene mis-classificato
+
+Mostriamo l'attacco al panda con ε=0.01:
+
+- A sinistra: l'immagine **originale**, classificata correttamente.
+- Al centro: la **perturbazione** (amplificata ×50 per essere visibile).
+- A destra: l'immagine **avversariale** = originale + perturbazione. Visivamente identica, ma classificata come qualcos'altro.
+
+**Questa è l'osservazione fondamentale**: la perturbazione è impercettibile, ma il modello ne è completamente fuorviato.
 """
 
-CELL_BIM_SWEEP = """\
-results_bim = {}
+CELL_DEMO_PANDA = '''
+EPSILON = 0.01
+x        = load_image("panda.jpg")
+y        = torch.tensor([388], device=DEVICE)
+x_adv    = bim_attack(model, x, y, EPSILON, steps=10)
+
+p_orig = predict(x,     k=1)[0]
+p_adv  = predict(x_adv, k=1)[0]
+
+# Perturbation amplified for visibility (centered around 0.5).
+perturb_amp = (x_adv - x) * 50.0 + 0.5
+
+fig, axes = plt.subplots(1, 3, figsize=(13, 4.6))
+
+axes[0].imshow(to_displayable(x))
+axes[0].axis("off")
+axes[0].set_title(f"ORIGINALE\\npredetto: {p_orig[1]}\\np={p_orig[2]:.3f}",
+                  fontsize=12, color="green", fontweight="bold")
+
+axes[1].imshow(to_displayable(perturb_amp))
+axes[1].axis("off")
+axes[1].set_title(f"PERTURBAZIONE (×50)\\nL-inf budget: \\u03b5={EPSILON}\\n(invisibile a ×1)",
+                  fontsize=12, color="black")
+
+axes[2].imshow(to_displayable(x_adv))
+axes[2].axis("off")
+flipped_color = "red" if p_adv[0] != 388 else "green"
+axes[2].set_title(f"AVVERSARIALE\\npredetto: {p_adv[1]}\\np={p_adv[2]:.3f}",
+                  fontsize=12, color=flipped_color, fontweight="bold")
+
+plt.suptitle(f"BIM attack su panda (\\u03b5={EPSILON}, 10 step) — il panda non c'e' piu'", fontsize=13)
+plt.tight_layout()
+plt.savefig(PACKAGE_ROOT / "challenge_2_adversarial" / "img" / "panda_demo.png", dpi=80, bbox_inches="tight")
+plt.show()
+
+print(f"Originale   : {p_orig[1]} (id={p_orig[0]}, p={p_orig[2]:.3f})")
+print(f"Avversariale: {p_adv[1]} (id={p_adv[0]}, p={p_adv[2]:.3f})")
+print(f"Perturbazione massima (L-inf): {(x_adv - x).abs().max().item():.6f}")
+'''
+
+# ----- Sweep: accuracy vs epsilon -----------------------------------------------------------------
+
+SWEEP_MD = """\
+## Sweep — a quale ε il modello cade?
+
+Estendiamo l'analisi a tutte e 5 le immagini per vari ε. Per ogni ε contiamo quante immagini restano classificate correttamente.
+"""
+
+CELL_SWEEP = '''
+EPSILONS = [0.001, 0.005, 0.01, 0.02, 0.05, 0.1]
+
+results = {}
 for eps in EPSILONS:
     flips = []
-    linfs = []
     for fname, expected_id, _ in SAMPLES:
-        x = load_image(fname)
-        y = torch.tensor([expected_id], device=DEVICE)
-        x_adv = bim_attack(model, x, y, eps, steps=10)
-        adv_pred_id = predict(x_adv, k=1)[0][0]
+        x_i = load_image(fname)
+        y_i = torch.tensor([expected_id], device=DEVICE)
+        x_adv_i = bim_attack(model, x_i, y_i, eps, steps=10)
+        adv_pred_id = predict(x_adv_i, k=1)[0][0]
         flips.append(adv_pred_id != expected_id)
-        linfs.append((x_adv - x).abs().max().item())
-    results_bim[eps] = {"acc": 1.0 - sum(flips) / len(flips), "linf": float(np.mean(linfs)), "flips": flips}
+    results[eps] = {"acc": 1.0 - sum(flips) / len(flips), "flips": flips}
 
-print(f"{'eps':<10}{'acc_FGSM':<12}{'acc_BIM-10':<12}")
+print(f"{'eps':<10}{'accuracy':<12}{'# flipped':<12}{'classes flipped at this eps'}")
 for eps in EPSILONS:
-    print(f"{eps:<10}{results[eps]['acc']:<12.3f}{results_bim[eps]['acc']:<12.3f}")
+    flipped_names = [SAMPLES[i][2] for i, f in enumerate(results[eps]["flips"]) if f]
+    print(f"{eps:<10}{results[eps]['acc']:<12.2f}{sum(results[eps]['flips']):<12}{', '.join(flipped_names) if flipped_names else '-'}")
+'''
+
+CELL_GRID_ALL_ATTACKED_MD = """\
+### Tutte e 5 le immagini attaccate (ε=0.01)
+
+Per convincervi che non si tratta di un caso fortunato sul panda, ripetiamo l'attacco sulle altre 4 immagini al solito ε=0.01. Ciascuna riga: originale | perturbazione ×50 | avversariale, con le predizioni stampate.
 """
 
-CELL_BIM_PLOT = """\
+CELL_GRID_ALL_ATTACKED = '''
+EPS_GRID = 0.01
+fig, axes = plt.subplots(len(SAMPLES), 3, figsize=(11, 3.6 * len(SAMPLES)))
+
+for row, (fname, expected_id, expected_name) in enumerate(SAMPLES):
+    x_i = load_image(fname)
+    y_i = torch.tensor([expected_id], device=DEVICE)
+    x_adv_i = bim_attack(model, x_i, y_i, EPS_GRID, steps=10)
+    perturb_amp = (x_adv_i - x_i) * 50.0 + 0.5
+    p_orig = predict(x_i,     k=1)[0]
+    p_adv  = predict(x_adv_i, k=1)[0]
+    flipped = p_adv[0] != expected_id
+
+    axes[row, 0].imshow(to_displayable(x_i))
+    axes[row, 0].axis("off")
+    axes[row, 0].set_title(f"ORIGINALE\\n{p_orig[1]} (p={p_orig[2]:.2f})",
+                           fontsize=10, color="green", fontweight="bold")
+
+    axes[row, 1].imshow(to_displayable(perturb_amp))
+    axes[row, 1].axis("off")
+    axes[row, 1].set_title(f"perturbazione \\u00d750\\n\\u03b5 = {EPS_GRID}", fontsize=10)
+
+    axes[row, 2].imshow(to_displayable(x_adv_i))
+    axes[row, 2].axis("off")
+    color = "red" if flipped else "green"
+    flag = "FLIPPED" if flipped else "robust"
+    axes[row, 2].set_title(f"AVVERSARIALE [{flag}]\\n{p_adv[1]} (p={p_adv[2]:.2f})",
+                           fontsize=10, color=color, fontweight="bold")
+
+plt.suptitle(f"BIM-10 a \\u03b5={EPS_GRID} su tutte e 5 le immagini", fontsize=13, y=1.0)
+plt.tight_layout()
+plt.savefig(PACKAGE_ROOT / "challenge_2_adversarial" / "img" / "all_attacked.png", dpi=72, bbox_inches="tight")
+plt.show()
+'''
+
+CELL_SWEEP_PLOT = '''
 fig, ax = plt.subplots(figsize=(7.5, 4.5))
 xs = list(results.keys())
-ys_fgsm = [results[e]['acc']     for e in xs]
-ys_bim  = [results_bim[e]['acc'] for e in xs]
-ax.plot(xs, ys_fgsm, marker='o', color='#4477AA', label='FGSM (1 step)')
-ax.plot(xs, ys_bim,  marker='s', color='#CC3311', label='BIM-10 (10 steps, alpha=eps/4)')
-ax.set_xscale('log')
-ax.set_xlabel('epsilon (L-inf budget)')
-ax.set_ylabel('accuracy on 5 samples')
+ys = [results[e]["acc"] for e in xs]
+ax.plot(xs, ys, marker="o", color="#CC3311", linewidth=2)
+ax.set_xscale("log")
+ax.set_xlabel("\\u03b5 (L-inf perturbation budget)")
+ax.set_ylabel("accuracy on 5 samples")
 ax.set_ylim(-0.05, 1.05)
-ax.axhline(0.8, ls='--', color='grey', label='target 80%')
-ax.set_title('FGSM vs BIM-10 — MobileNetV2 robustness')
+ax.axhline(0.8, ls="--", color="grey", label="soglia operativa 80%")
+ax.set_title("MobileNetV2 — accuratezza vs budget di perturbazione (BIM-10)")
 ax.legend()
 plt.tight_layout()
-plt.savefig(PACKAGE_ROOT / 'challenge_2_adversarial' / 'img' / 'fgsm_vs_bim.png', dpi=110, bbox_inches='tight')
+plt.savefig(PACKAGE_ROOT / "challenge_2_adversarial" / "img" / "eps_sweep.png", dpi=110, bbox_inches="tight")
 plt.show()
+'''
+
+# ----- Evidence row -------------------------------------------------------------------------------
+
+EVIDENCE_MD = r"""
+## TODO — Compilate l'evidence row
+
+Definiamo la *robustezza operativa* in modo non ambiguo:
+
+$$\varepsilon_{\max}^{(80\%)} = \max\Bigl\{\varepsilon : \mathrm{acc}(\varepsilon') \geq 0.80 \,\,\forall\, \varepsilon' \leq \varepsilon\Bigr\}$$
+
+cioè il più grande budget di perturbazione per cui l'accuratezza resta $\geq 0.80$ **in maniera monotona** (dal valore più piccolo testato fino a $\varepsilon$ incluso). Se l'accuratezza scende sotto $0.80$ già al primo $\varepsilon$ testato, $\varepsilon_{\max} = 0$ — il modello non è robusto al budget testato più piccolo.
+
+Compilate l'evidence row qui sotto. Soglia operativa proposta: $\varepsilon_{\max} \geq 0.05$. Se non la raggiunge, `status=fail`.
 """
 
-TODO5_EVIDENCE_MD = """\
-### Seconda evidence row — robustezza vs BIM-10
+EVIDENCE_STARTER = '''
+# TODO: calcolate eps_max e scrivete una riga in shared/evidence_template.csv.
 
-BIM-10 è il primo attacco *vero* che lanciate. La robustezza misurata vs FGSM era una sotto-stima fortissima della vulnerabilità. Compilate ora una **seconda** evidence row con metrica `Adversarial robustness (BIM-10, L-inf, eps_max @ 80% acc)`. Stessa soglia operativa ($\\varepsilon_{\\max} \\geq 0.05$). Lo `status` sarà quasi certamente `fail` a un budget molto più piccolo.
-"""
+THRESHOLD_ACC = 0.80
+THRESHOLD_EPS = 0.05
 
-TODO5_EVIDENCE_STARTER = """\
-# TODO 5 (evidence): seconda evidence row per BIM-10.
+eps_max = None  # TODO: il piu' grande eps tale che per OGNI e <= eps, results[e]["acc"] >= THRESHOLD_ACC.
+                #       Iterare sorted(EPSILONS) e fermarsi alla prima violazione.
+                #       Se anche il piu' piccolo eps gia' viola, eps_max = 0.0.
 
-THRESHOLD_EPS_BIM = 0.05
+if eps_max is None:
+    raise NotImplementedError("Calcolare eps_max")
 
-eps_max_bim = None  # TODO: stessa logica monotona di eps_max in TODO 4, ma su results_bim.
-
-if eps_max_bim is None:
-    raise NotImplementedError("Calcolare eps_max_bim sulla curva BIM.")
-
-status_bim = "pass" if eps_max_bim >= THRESHOLD_EPS_BIM else "fail"
-NOTES_BIM = ""  # TODO: una frase, includendo il delta vs FGSM (eps_max FGSM era {eps_max:.4f}).
-
-if not NOTES_BIM:
-    raise NotImplementedError("Compilare NOTES_BIM.")
+status = "pass" if eps_max >= THRESHOLD_EPS else "fail"
+NOTES = ""  # TODO: una frase, specifica (es. "primi a flippare: golden retriever; eps_max = 0").
+if not NOTES:
+    raise NotImplementedError("Compilare NOTES")
 
 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 import csv
@@ -654,11 +427,11 @@ row = dict(
     challenge="C2",
     system="ImageNet-MobileNetV2",
     metric="Adversarial robustness (BIM-10, L-inf, eps_max @ 80% acc)",
-    threshold=f">= {THRESHOLD_EPS_BIM}",
-    observed=f"{eps_max_bim:.4f}",
-    status=status_bim,
+    threshold=f">= {THRESHOLD_EPS}",
+    observed=f"{eps_max:.4f}",
+    status=status,
     mitigation="none",
-    notes=NOTES_BIM,
+    notes=NOTES,
     timestamp=ts,
 )
 EVIDENCE_CSV.parent.mkdir(parents=True, exist_ok=True)
@@ -668,25 +441,33 @@ with EVIDENCE_CSV.open("a", newline="") as f:
     if write_header:
         w.writeheader()
     w.writerow(row)
-print(f"eps_max BIM-10 @ 80% acc = {eps_max_bim:.4f}  ->  status={status_bim}")
+print(f"eps_max @ 80% acc = {eps_max:.4f}  ->  status={status}")
 print(f"Wrote evidence row to {EVIDENCE_CSV}")
-"""
+'''
 
-TODO5_EVIDENCE_SOLUTION = """\
-THRESHOLD_EPS_BIM = 0.05
-eps_max_bim = 0.0
+EVIDENCE_SOLUTION = '''
+THRESHOLD_ACC = 0.80
+THRESHOLD_EPS = 0.05
+
+eps_max = 0.0
 for eps in sorted(EPSILONS):
-    if results_bim[eps]["acc"] >= THRESHOLD_ACC:
-        eps_max_bim = eps
+    if results[eps]["acc"] >= THRESHOLD_ACC:
+        eps_max = eps
     else:
         break
 
-status_bim = "pass" if eps_max_bim >= THRESHOLD_EPS_BIM else "fail"
-NOTES_BIM = (
-    f"BIM-10 dimostra che FGSM e' una sotto-stima: a {min(EPSILONS):.3f} l'accuratezza scende "
-    f"a {results_bim[min(EPSILONS)]['acc']:.2f} (vs {results[min(EPSILONS)]['acc']:.2f} con FGSM). "
-    f"eps_max BIM-10 = {eps_max_bim:.4f} vs eps_max FGSM = {eps_max:.4f}. "
-    f"Conclusione: il modello non e' robusto a perturbazioni gradient-based."
+status = "pass" if eps_max >= THRESHOLD_EPS else "fail"
+
+# Identify which classes flipped at the smallest broken epsilon (for an informative note).
+broken_eps = next((e for e in sorted(EPSILONS) if results[e]["acc"] < THRESHOLD_ACC), None)
+flipped_first = []
+if broken_eps is not None:
+    flipped_first = [SAMPLES[i][2] for i, f in enumerate(results[broken_eps]["flips"]) if f]
+
+NOTES = (
+    f"BIM-10 (L-inf): a eps={EPSILONS[0]:.3f} acc={results[EPSILONS[0]]['acc']:.2f}; "
+    f"prime classi a flippare: {', '.join(flipped_first[:3]) if flipped_first else 'nessuna nei test'}. "
+    f"Modello non robusto a perturbazioni gradient-based sotto soglia operativa {THRESHOLD_EPS}."
 )
 
 ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -695,11 +476,11 @@ row = dict(
     challenge="C2",
     system="ImageNet-MobileNetV2",
     metric="Adversarial robustness (BIM-10, L-inf, eps_max @ 80% acc)",
-    threshold=f">= {THRESHOLD_EPS_BIM}",
-    observed=f"{eps_max_bim:.4f}",
-    status=status_bim,
+    threshold=f">= {THRESHOLD_EPS}",
+    observed=f"{eps_max:.4f}",
+    status=status,
     mitigation="none",
-    notes=NOTES_BIM,
+    notes=NOTES,
     timestamp=ts,
 )
 EVIDENCE_CSV.parent.mkdir(parents=True, exist_ok=True)
@@ -709,21 +490,76 @@ with EVIDENCE_CSV.open("a", newline="") as f:
     if write_header:
         w.writeheader()
     w.writerow(row)
-print(f"eps_max BIM-10 @ 80% acc = {eps_max_bim:.4f}  ->  status={status_bim}")
+print(f"eps_max @ 80% acc = {eps_max:.4f}  ->  status={status}")
 print(f"Wrote evidence row to {EVIDENCE_CSV}")
+'''
+
+# ----- Optional: FGSM comparison (no TODO) --------------------------------------------------------
+
+FGSM_COMPARE_MD = r"""
+## (Opzionale) Confronto con FGSM: l'attacco *single-step*
+
+Per completezza storica: **FGSM** (Goodfellow et al. 2015) è l'attacco originale, una sola iterazione:
+
+$$x_{\mathrm{adv}} = \mathrm{clip}_{[0,1]}\bigl(x + \varepsilon \cdot \mathrm{sign}(\nabla_x \mathcal{L}(\theta, x, y))\bigr)$$
+
+Su MobileNetV2 con queste 5 immagini, FGSM è troppo debole per produrre un fallimento netto a piccoli ε. Vediamolo a confronto con BIM:
 """
 
+CELL_FGSM_COMPARE = '''
+def fgsm_attack(model, image, label, epsilon):
+    image = image.clone().detach().requires_grad_(True)
+    logits = model(image)
+    loss = F.cross_entropy(logits, label)
+    model.zero_grad()
+    loss.backward()
+    return (image + epsilon * image.grad.sign()).clamp(0.0, 1.0).detach()
+
+results_fgsm = {}
+for eps in EPSILONS:
+    flips = []
+    for fname, expected_id, _ in SAMPLES:
+        x_i = load_image(fname)
+        y_i = torch.tensor([expected_id], device=DEVICE)
+        x_adv_i = fgsm_attack(model, x_i, y_i, eps)
+        flips.append(predict(x_adv_i, k=1)[0][0] != expected_id)
+    results_fgsm[eps] = sum(flips) / len(flips)
+
+fig, ax = plt.subplots(figsize=(7.5, 4.5))
+xs = list(EPSILONS)
+ys_bim  = [results[e]["acc"]     for e in xs]
+ys_fgsm = [1.0 - results_fgsm[e] for e in xs]
+ax.plot(xs, ys_fgsm, marker="o", color="#4477AA", label="FGSM (1 step)", linewidth=2)
+ax.plot(xs, ys_bim,  marker="s", color="#CC3311", label="BIM (10 step, alpha=eps/4)", linewidth=2)
+ax.set_xscale("log")
+ax.set_xlabel("\\u03b5 (L-inf perturbation budget)")
+ax.set_ylabel("accuracy on 5 samples")
+ax.set_ylim(-0.05, 1.05)
+ax.axhline(0.8, ls="--", color="grey", label="soglia 80%")
+ax.set_title("FGSM vs BIM — perche' usiamo BIM")
+ax.legend()
+plt.tight_layout()
+plt.savefig(PACKAGE_ROOT / "challenge_2_adversarial" / "img" / "fgsm_vs_bim.png", dpi=110, bbox_inches="tight")
+plt.show()
+
+print(f"\\n{'eps':<10}{'acc_FGSM':<12}{'acc_BIM-10':<12}")
+for eps in EPSILONS:
+    print(f"{eps:<10}{1.0 - results_fgsm[eps]:<12.2f}{results[eps]['acc']:<12.2f}")
+'''
+
 CLOSING_MD = """\
-## Chiusura — Cosa avete *non* fatto
+## Chiusura — Cosa avete dimostrato (e cosa no)
 
-Avete confrontato FGSM (attacco *single-step*) con BIM-10 (iterativo, proiettato). BIM è essenzialmente PGD senza random init. Cosa rimane fuori:
+**Risultato.** Una evidence row che documenta la robustezza vs un attacco gradient-based standard (BIM-10), con una soglia operativa esplicita.
 
-1. **PGD propriamente detto** — Madry et al. 2018. BIM + perturbazione iniziale uniforme in $B_\\infty(0, \\varepsilon)$. La random init mitiga i minimi locali — utile soprattutto in regime adversarial training.
-2. **AutoAttack** — Croce & Hein 2020. Ensemble parameter-free di 4 attacchi (APGD-CE, APGD-DLR, FAB, Square). Standard de-facto per la valutazione di robustezza pubblicata su [robustbench.github.io](https://robustbench.github.io/).
-3. **Attacchi mirati (targeted)** — anziché massimizzare la loss della classe vera, minimizzano la loss verso una classe scelta. Vedi *stretch goal* S1.
-4. **Attacchi black-box** — Square Attack, ZOO, NES — funzionano senza accesso ai gradienti. Più costosi ma applicabili a modelli serviti via API.
+**Cosa NON avete dimostrato (limiti onesti, vanno nelle Notes del fascicolo reale):**
 
-**Implicazioni di Art. 15.** Il vostro evidence row dichiara robustezza vs FGSM; un fascicolo Annex IV professionale userebbe almeno PGD-20 e AutoAttack come metodi di valutazione, e includerebbe più di 5 immagini (tipicamente 1000+ dal validation set).
+1. **5 immagini è poco.** Audit reale: sub-set del validation ImageNet (1000+ immagini). Statistica significativa.
+2. **BIM è uno solo degli attacchi.** Audit professionale userebbe almeno **AutoAttack** (Croce & Hein 2020) — ensemble parameter-free di 4 attacchi (APGD-CE, APGD-DLR, FAB, Square) — e PGD con multi-restart.
+3. **Solo perturbazioni $L_\\infty$.** Esistono anche $L_2$, $L_0$, attacchi geometrici (rotazioni, traslazioni), attacchi fisici (sticker su segnali stradali, Eykholt et al. 2018), attacchi black-box (NES, Square Attack, ZOO).
+4. **Nessuna mitigazione testata.** Le difese reali combinano *adversarial training* (Madry et al. 2018), input preprocessing (JPEG compression), certified defenses (randomized smoothing, Cohen et al. 2019).
+
+**In ai.res** queste righe diventano controlli versionati nel ledger di evidenze, con re-test settimanali su attacchi standardizzati e con tracking del delta accuracy → fuori soglia operativa = alert.
 
 > Per chi volesse approfondire: [robustbench.github.io](https://robustbench.github.io/) mantiene un leaderboard di modelli e attacchi standardizzati.
 """
@@ -731,63 +567,65 @@ Avete confrontato FGSM (attacco *single-step*) con BIM-10 (iterativo, proiettato
 STRETCH_MD = """\
 ## Stretch goals (solo soluzione)
 
-### S1 — FGSM mirato (targeted)
+### S1 — BIM mirato (targeted)
 
-Forziamo il modello a predire una classe specifica (`target_id`), non solo "qualcos'altro che non sia la classe vera". Implementazione: sign del gradiente *negativo* della loss verso `target_id`.
+Forziamo il modello a predire una classe specifica (`target_id=805` = soccer ball), non "qualcos'altro che non sia panda". Implementazione: scendere il gradiente verso `target_id` (nota il segno meno).
 
 ### S2 — PGD con random init
 
-BIM ha init in $x$. PGD aggiunge `x + uniform(-eps, eps)` come init. Confrontate il *worst-case attack success* su $k$ ripetizioni.
+BIM ha init in $x$. PGD aggiunge `x + uniform(-eps, eps)` come init. Lancia `k` ripetizioni e prendi il *worst-case*.
 """
 
 STRETCH_S1 = """\
-# Stretch S1: targeted FGSM on the panda. Force the model to predict 'soccer ball' (id 805).
-
-def targeted_fgsm(model, image, target_label, epsilon):
-    image = image.clone().detach().requires_grad_(True)
-    logits = model(image)
-    loss = F.cross_entropy(logits, target_label)
-    model.zero_grad()
-    loss.backward()
-    # NOTE the minus sign: we descend the loss towards target.
-    perturb = -epsilon * image.grad.sign()
-    return (image + perturb).clamp(0.0, 1.0).detach()
+def targeted_bim(model, image, target_label, epsilon, alpha=None, steps=10):
+    if alpha is None:
+        alpha = epsilon / 4
+    x_adv = image.clone().detach()
+    for _ in range(steps):
+        x_adv = x_adv.detach().requires_grad_(True)
+        logits = model(x_adv)
+        loss = F.cross_entropy(logits, target_label)
+        model.zero_grad(); loss.backward()
+        # NOTE: minus sign (we descend the loss towards target_label).
+        x_adv = x_adv - alpha * x_adv.grad.sign()
+        x_adv = torch.max(torch.min(x_adv, image + epsilon), image - epsilon).clamp(0.0, 1.0)
+    return x_adv.detach()
 
 panda_x = load_image("panda.jpg")
-target = torch.tensor([805], device=DEVICE)  # soccer ball
-
-x_adv = targeted_fgsm(model, panda_x, target, epsilon=0.03)
-top5 = predict(x_adv, k=5)
-print("Top-5 after targeted FGSM (target='soccer ball'):")
+target  = torch.tensor([805], device=DEVICE)  # soccer ball
+adv     = targeted_bim(model, panda_x, target, epsilon=0.03, steps=20)
+top5    = predict(adv, k=5)
+print("Top-5 dopo BIM mirato (target='soccer ball'):")
 for cid, name, p in top5:
     print(f"  {cid:4d}  {name:30s}  {p:.3f}")
 """
 
 STRETCH_S2 = """\
-# Stretch S2: basic PGD untargeted on the panda.
-
-def pgd_attack(model, image, label, epsilon, alpha, steps):
-    x_adv = image.clone().detach() + torch.empty_like(image).uniform_(-epsilon, epsilon)
-    x_adv = x_adv.clamp(0.0, 1.0)
-    for _ in range(steps):
-        x_adv = x_adv.detach().requires_grad_(True)
-        logits = model(x_adv)
-        loss = F.cross_entropy(logits, label)
-        model.zero_grad()
-        loss.backward()
-        x_adv = x_adv + alpha * x_adv.grad.sign()
-        # Project back to L-inf ball around the original image.
-        x_adv = torch.max(torch.min(x_adv, image + epsilon), image - epsilon)
-        x_adv = x_adv.clamp(0.0, 1.0)
-    return x_adv.detach()
+def pgd_with_random_init(model, image, label, epsilon, alpha=None, steps=10, restarts=5):
+    if alpha is None:
+        alpha = epsilon / 4
+    best_loss = -float("inf")
+    best_adv  = image
+    for _ in range(restarts):
+        x_adv = (image + torch.empty_like(image).uniform_(-epsilon, epsilon)).clamp(0.0, 1.0)
+        for _ in range(steps):
+            x_adv = x_adv.detach().requires_grad_(True)
+            logits = model(x_adv)
+            loss = F.cross_entropy(logits, label)
+            model.zero_grad(); loss.backward()
+            x_adv = x_adv + alpha * x_adv.grad.sign()
+            x_adv = torch.max(torch.min(x_adv, image + epsilon), image - epsilon).clamp(0.0, 1.0)
+        with torch.no_grad():
+            l = F.cross_entropy(model(x_adv), label).item()
+            if l > best_loss:
+                best_loss, best_adv = l, x_adv
+    return best_adv.detach()
 
 panda_x = load_image("panda.jpg")
 panda_y = torch.tensor([388], device=DEVICE)
-
-for steps in [1, 5, 20]:
-    adv = pgd_attack(model, panda_x, panda_y, epsilon=0.01, alpha=0.002, steps=steps)
-    top1 = predict(adv, k=1)[0]
-    print(f"PGD-{steps:>2d} (eps=0.01): {top1[1]} (p={top1[2]:.3f})")
+adv     = pgd_with_random_init(model, panda_x, panda_y, epsilon=0.005, steps=10, restarts=5)
+top1    = predict(adv, k=1)[0]
+print(f"PGD-restart-5 a eps=0.005: top1={top1[1]} p={top1[2]:.3f}")
 """
 
 
@@ -814,26 +652,22 @@ def build(starter: bool) -> list:
         code(CELL_NORMALIZED_MODEL),
         md("## 2. Helper per immagini e predizioni"),
         code(CELL_PREPROCESS_HELPER),
+        md("### Predizioni baseline (devono essere tutte corrette)"),
         code(CELL_BASELINE_PREDICT),
-        md(TODO1_MD),
-        code(TODO1_STARTER if starter else TODO1_SOLUTION),
-        code(CELL_VERIFY_TODO1),
-        md(TODO2_MD),
-        code(TODO2_STARTER if starter else TODO2_SOLUTION),
-        md(TODO3_MD),
-        code(TODO3_STARTER if starter else TODO3_SOLUTION),
-        md("### Visualizzazione: griglia ε-sweep + curva accuracy/eps"),
-        code(CELL_VIZ_GRID),
-        md(TODO4_MD),
-        code(TODO4_STARTER if starter else TODO4_SOLUTION),
-        md(BIM_INTRO_MD),
-        code(TODO5_STARTER if starter else TODO5_SOLUTION),
-        code(CELL_VERIFY_TODO5),
-        md(BIM_SWEEP_MD),
-        code(CELL_BIM_SWEEP),
-        code(CELL_BIM_PLOT),
-        md(TODO5_EVIDENCE_MD),
-        code(TODO5_EVIDENCE_STARTER if starter else TODO5_EVIDENCE_SOLUTION),
+        md(TODO_BIM_MD),
+        code(TODO_BIM_STARTER if starter else TODO_BIM_SOLUTION),
+        code(CELL_VERIFY_BIM),
+        md(DEMO_MD),
+        code(CELL_DEMO_PANDA),
+        md(SWEEP_MD),
+        code(CELL_SWEEP),
+        md(CELL_GRID_ALL_ATTACKED_MD),
+        code(CELL_GRID_ALL_ATTACKED),
+        code(CELL_SWEEP_PLOT),
+        md(EVIDENCE_MD),
+        code(EVIDENCE_STARTER if starter else EVIDENCE_SOLUTION),
+        md(FGSM_COMPARE_MD),
+        code(CELL_FGSM_COMPARE),
         md(CLOSING_MD),
     ]
     if not starter:
