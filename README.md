@@ -8,13 +8,14 @@ A cura di **Luca Giamattei** — CEO di [ai.res s.r.l.](https://airesgroup.ai), 
 
 ## 1. Cosa contiene questo pacchetto
 
-Tre sfide pratiche, ciascuna da ~25–35 minuti, ispirate a casi reali di non-conformità ai requisiti dell'AI Act (Regolamento UE 2024/1689):
+Quattro sfide pratiche, ispirate a casi reali di non-conformità ai requisiti dell'AI Act (Regolamento UE 2024/1689):
 
 | # | Sfida | Tecnica | Articoli AI Act rilevanti |
 |---|-------|---------|---------------------------|
 | C1 | **Cerca il bias** — fairness audit su German Credit | `fairlearn.MetricFrame`, `ThresholdOptimizer` | Art. 9, 10, 13, 14 |
 | C2 | **Rompi il modello** — esempi avversariali FGSM | `torch`, MobileNetV2 pre-addestrato | Art. 15 |
 | C3 | **Red-team un LLM** — jailbreak / prompt injection / hallucination | API Groq, `llama-3.1-8b-instant` | Art. 9, 13, 15 |
+| C4 | **Difese LLM e leaderboard** — LLM-as-judge + defense delta | API Groq, `llama-3.3-70b-versatile` come judge | Art. 9.2.d, 15 |
 
 Ogni sfida produce una o più **evidence row** (vedi `docs/EVIDENCE_TEMPLATE.md`): righe strutturate in formato CSV che documentano metrica, soglia, valore osservato, stato di conformità ed eventuale mitigazione. Le evidence row di tutte e tre le sfide confluiscono in `shared/evidence_template.csv`, simulando un *evidence pack* destinato al fascicolo di conformità tecnica (Art. 11, Allegato IV).
 
@@ -30,7 +31,8 @@ ai_res_lab/
 │   └── evidence_template.csv
 ├── challenge_1_fairness/
 ├── challenge_2_adversarial/
-└── challenge_3_llm_redteam/
+├── challenge_3_llm_redteam/
+└── challenge_4_llm_defense/
 ```
 
 ## 2. Setup
@@ -78,7 +80,8 @@ Ogni sfida è indipendente. L'ordine consigliato è C1 → C2 → C3, ma le sfid
 |-------|-----------------|----------------|-----------------|
 | C1 | Subito dopo l'introduzione (lezione, slide 1–25) | 25 min | Notebook compilato + evidence row in `shared/evidence_template.csv` |
 | C2 | A metà laboratorio | 30 min | Notebook compilato + figura comparativa originale/perturbazione/avversariale + evidence row |
-| C3 | Ultima ora | 35 min | Notebook compilato + evidence row per ciascuna delle 3 categorie di attacco |
+| C3 | Inizio ultima ora | 35 min | Notebook compilato + evidence row per ciascuna delle 3 categorie di attacco |
+| C4 | Subito dopo C3 (riusa la chiave Groq) | 25 min | Leaderboard con 3 vostri tentativi + 2 evidence row (pre/post defense) |
 
 Ogni notebook è strutturato con celle di **TODO** marcate da `# TODO:` e da una cella markdown precedente che spiega cosa fare e perché. Dopo ogni TODO maggiore c'è una cella di verifica che stampa `expected vs actual` o asserisce un invariante: vi consente di sapere se siete sulla strada giusta senza dover eseguire l'intero notebook.
 

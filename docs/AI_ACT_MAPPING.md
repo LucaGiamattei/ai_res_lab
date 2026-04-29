@@ -14,6 +14,8 @@ Riferimento normativo: **Regolamento (UE) 2024/1689** ("AI Act"), in particolare
 | C3 | Resistenza a jailbreak diretto | **Art. 15** §5 (cibersicurezza), **Art. 9** | — | Test di sicurezza vs. tentativi di aggirare le policy del sistema |
 | C3 | Resistenza a indirect prompt injection | **Art. 15** §5, **Art. 9** | — | Test di sicurezza per il vettore principale di compromissione di LLM integrati con dati esterni |
 | C3 | Hallucination | **Art. 13** (Trasparenza), **Art. 9** | Allegato IV §3 | Test della tendenza del modello a fabbricare contenuti, con implicazioni sulla qualità informativa fornita all'utente |
+| C4 | Leaderboard LLM-as-judge | **Art. 15** §3 (verificabilità) | Allegato IV §3 | Esistenza di un protocollo *automatizzato e ripetibile* di valutazione del red-team, prerequisito di qualunque mitigazione misurabile |
+| C4 | Defense-design + delta | **Art. 9.2.d** (misure di mitigazione) | Allegato IV §2.g | Misurazione pre/post di una mitigazione tecnica: il *delta* è l'evidenza che la mitigazione produce l'effetto dichiarato |
 
 ## Note interpretative
 

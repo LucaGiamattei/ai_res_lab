@@ -273,6 +273,12 @@ def check_package_files(r: Result):
         "challenge_3_llm_redteam/prompts/bank_assistant_system.txt",
         "challenge_3_llm_redteam/prompts/injection_email_1.txt",
         "challenge_3_llm_redteam/prompts/injection_email_2.txt",
+        "challenge_4_llm_defense/README.md",
+        "challenge_4_llm_defense/starter.ipynb",
+        "challenge_4_llm_defense/solution.ipynb",
+        "challenge_4_llm_defense/prompts/judge_system.txt",
+        "challenge_4_llm_defense/prompts/bank_assistant_hardened.txt",
+        "challenge_4_llm_defense/prompts/jailbreak_seed_prompts.txt",
     ]
     for rel in expected:
         p = ROOT / rel
