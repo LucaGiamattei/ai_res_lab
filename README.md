@@ -1,10 +1,5 @@
 # Lab di AI Testing & Governance
 
-Pacchetto laboratorio per la lezione magistrale (4 ore) su testing e governance dei sistemi di intelligenza artificiale, rivolto agli studenti del corso di laurea magistrale in Ingegneria Informatica dell'Università degli Studi di Napoli Federico II.
-
-
----
-
 ## 1. Cosa contiene questo pacchetto
 
 Quattro sfide pratiche, ispirate a casi reali di non-conformità ai requisiti dell'AI Act (Regolamento UE 2024/1689):
