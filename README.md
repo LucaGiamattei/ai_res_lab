@@ -2,7 +2,6 @@
 
 Pacchetto laboratorio per la lezione magistrale (4 ore) su testing e governance dei sistemi di intelligenza artificiale, rivolto agli studenti del corso di laurea magistrale in Ingegneria Informatica dell'Università degli Studi di Napoli Federico II.
 
-A cura di **Luca Giamattei** — CEO di [ai.res s.r.l.](https://airesgroup.ai), spin-off UniNa, e docente di AI Testing.
 
 ---
 
